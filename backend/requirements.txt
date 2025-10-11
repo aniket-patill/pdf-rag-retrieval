@@ -1,0 +1,29 @@
+# Django and Django REST Framework
+Django==5.0.3
+djangorestframework==3.14.0
+django-cors-headers==4.3.1
+
+# PDF Processing
+PyMuPDF==1.23.8
+pdfplumber==0.10.3
+
+# Vector Database
+# chromadb==0.4.22  # Temporarily disabled due to build issues
+
+# AI/ML
+google-generativeai==0.3.2
+
+# Authentication
+PyJWT==2.8.0
+
+# Environment and Configuration
+python-dotenv==1.0.0
+
+# Utilities
+requests==2.31.0
+
+# Development
+pytest==7.4.3
+pytest-django==4.7.0
+black==23.11.0
+flake8==6.1.0
