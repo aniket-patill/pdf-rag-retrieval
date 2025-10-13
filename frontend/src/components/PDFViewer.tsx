@@ -25,11 +25,12 @@ if (typeof window !== 'undefined') {
 interface PDFViewerProps {
   fileUrl: string;
   title: string;
+  initialPage?: number;
 }
 
-export function PDFViewer({ fileUrl, title }: PDFViewerProps) {
+export function PDFViewer({ fileUrl, title, initialPage }: PDFViewerProps) {
   const [numPages, setNumPages] = useState<number>(0);
-  const [pageNumber, setPageNumber] = useState<number>(1);
+  const [pageNumber, setPageNumber] = useState<number>(initialPage || 1);
   const [scale, setScale] = useState<number>(1.0);
   const [rotation, setRotation] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(true);
@@ -58,7 +59,7 @@ export function PDFViewer({ fileUrl, title }: PDFViewerProps) {
     setLoading(true);
     setError(null);
     setNumPages(0);
-    setPageNumber(1);
+    setPageNumber(initialPage || 1);
     
     // Force start loading after a brief delay to ensure everything is ready
     const timer = setTimeout(() => {
@@ -66,7 +67,7 @@ export function PDFViewer({ fileUrl, title }: PDFViewerProps) {
     }, 100);
     
     return () => clearTimeout(timer);
-  }, [fileUrl]);
+  }, [fileUrl, initialPage]);
 
   // Test PDF URL accessibility and worker
   useEffect(() => {

@@ -29,6 +29,7 @@ export interface QueryResponse {
     chunk_index: number;
     score: number;
     text_preview: string;
+    page?: number;
   }>;
   query: string;
 }
@@ -52,6 +53,30 @@ export interface SearchHistoryItem {
   id: number;
   search_query: string;
   results_count: number;
+  created_at: string;
+}
+
+export interface Conversation {
+  id: string;
+  clerk_user_id: string;
+  title?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChatMessage {
+  id: number;
+  conversation: string;
+  role: 'user' | 'assistant';
+  content: string;
+  citations: Array<{
+    document_id: string;
+    chunk_index: number;
+    score: number;
+    text_preview: string;
+    page?: number;
+  }>;
+  document_ids: string[];
   created_at: string;
 }
 
@@ -204,6 +229,66 @@ export class ApiService {
       const errorText = await response.text();
       console.error('deleteSearchHistoryItem error:', response.status, errorText);
       throw new Error(`Failed to delete search history item: ${response.statusText} - ${errorText}`);
+    }
+  }
+
+  // Chat API
+  async createConversation(token?: string): Promise<{ conversation_id: string }> {
+    const response = await fetch(`${API_BASE_URL}/chat/conversations/`, {
+      method: 'POST',
+      headers: this.getHeaders(token),
+      body: JSON.stringify({})
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to create conversation: ${response.statusText} - ${errorText}`);
+    }
+    return response.json();
+  }
+
+  async listConversations(token?: string): Promise<Conversation[]> {
+    const response = await fetch(`${API_BASE_URL}/chat/conversations/list/`, {
+      headers: this.getHeaders(token)
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to list conversations: ${response.statusText} - ${errorText}`);
+    }
+    return response.json();
+  }
+
+  async getConversationMessages(conversationId: string, token?: string): Promise<ChatMessage[]> {
+    const response = await fetch(`${API_BASE_URL}/chat/conversations/${conversationId}/messages/`, {
+      headers: this.getHeaders(token)
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to fetch messages: ${response.statusText} - ${errorText}`);
+    }
+    return response.json();
+  }
+
+  async sendChatMessage(conversationId: string, content: string, token?: string): Promise<{ answer: string; sources: QueryResponse['sources'] }> {
+    const response = await fetch(`${API_BASE_URL}/chat/conversations/${conversationId}/message/`, {
+      method: 'POST',
+      headers: this.getHeaders(token),
+      body: JSON.stringify({ content })
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to send chat message: ${response.statusText} - ${errorText}`);
+    }
+    return response.json();
+  }
+
+  async deleteConversation(conversationId: string, token?: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/chat/conversations/${conversationId}/delete/`, {
+      method: 'DELETE',
+      headers: this.getHeaders(token)
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to delete conversation: ${response.statusText} - ${errorText}`);
     }
   }
 }

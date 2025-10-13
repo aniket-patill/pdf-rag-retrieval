@@ -12,11 +12,11 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
 
-from .models import Document, DocumentChunk, QueryHistory, SearchHistory
+from .models import Document, DocumentChunk, QueryHistory, SearchHistory, Conversation, ChatMessage
 from .serializers import (
     DocumentSerializer, DocumentSummarySerializer, QuerySerializer, 
     QueryResponseSerializer, SearchSerializer, SearchResultSerializer,
-    QueryHistorySerializer, SearchHistorySerializer
+    QueryHistorySerializer, SearchHistorySerializer, ConversationSerializer, ChatMessageSerializer
 )
 from .services.pdf_service import PDFService
 from .services.embedding_service import EmbeddingService
@@ -123,6 +123,35 @@ def query_documents(request):
         # Generate answer using Gemini
         result = gemini_service.search_and_answer(query, similar_chunks)
         
+        # Augment sources with best-effort page number (1-based) for citations
+        augmented_sources = []
+        for src in result.get('sources', []):
+            try:
+                doc_id = src['document_id']
+                chunk_idx = src['chunk_index']
+                document = Document.objects.get(id=doc_id)  # type: ignore
+                
+                # Resolve full file path similar to serve_document_file
+                if document.file_path.startswith('pdfs/') or document.file_path.startswith('pdfs\\'):
+                    relative_path = document.file_path.replace('\\', os.sep).replace('/', os.sep)
+                    full_path = os.path.join(settings.BASE_DIR, relative_path)
+                else:
+                    full_path = document.file_path
+                
+                # Match full chunk text when possible
+                matched_chunk = next((c for c in similar_chunks 
+                                      if c['metadata']['document_id'] == doc_id and 
+                                         c['metadata']['chunk_index'] == chunk_idx), None)
+                chunk_text = matched_chunk['text'] if matched_chunk else src.get('text_preview', '')
+                pages = pdf_service.find_text_pages(full_path, chunk_text)
+                page = pages[0] if pages else None
+                augmented_sources.append({**src, 'page': page})
+            except Document.DoesNotExist:  # type: ignore
+                augmented_sources.append(src)
+            except Exception as e:
+                logger.error(f"Error augmenting source with page: {str(e)}")
+                augmented_sources.append(src)
+        
         # Save query history
         QueryHistory.objects.create(  # type: ignore
             clerk_user_id=clerk_user_id,
@@ -131,7 +160,11 @@ def query_documents(request):
             document_ids=[chunk['metadata']['document_id'] for chunk in similar_chunks]
         )
         
-        return Response(result)
+        return Response({
+            'answer': result['answer'],
+            'sources': augmented_sources,
+            'query': query
+        })
         
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}")
@@ -350,3 +383,145 @@ def serve_document_file(request, document_id):
     except Exception as e:
         logger.error(f"Error serving document file: {str(e)}")
         raise Http404("PDF file not found")
+
+
+# Chat endpoints
+@api_view(['POST'])
+def create_chat_conversation(request):
+    """Create a new conversation and return its ID."""
+    try:
+        clerk_user_id = getattr(request, 'clerk_user_id', 'anonymous')
+        title = request.data.get('title')
+        conv = Conversation.objects.create(clerk_user_id=clerk_user_id, title=title)  # type: ignore
+        return Response({'conversation_id': str(conv.id)})
+    except Exception as e:
+        logger.error(f"Error creating conversation: {str(e)}")
+        return Response({'error': 'Failed to create conversation'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+def list_chat_conversations(request):
+    """List recent conversations for the user."""
+    try:
+        clerk_user_id = getattr(request, 'clerk_user_id', None)
+        if not clerk_user_id:
+            return Response([])
+        convs = Conversation.objects.filter(clerk_user_id=clerk_user_id).order_by('-updated_at')[:50]  # type: ignore
+        serializer = ConversationSerializer(convs, many=True)
+        return Response(serializer.data)
+    except Exception as e:
+        logger.error(f"Error listing conversations: {str(e)}")
+        return Response({'error': 'Failed to list conversations'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+def get_chat_messages(request, conversation_id):
+    """Fetch messages for a conversation."""
+    try:
+        clerk_user_id = getattr(request, 'clerk_user_id', None)
+        conv = get_object_or_404(Conversation, id=conversation_id)
+        if clerk_user_id and str(conv.id) != conversation_id and conv.clerk_user_id != clerk_user_id:
+            return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+        msgs = ChatMessage.objects.filter(conversation=conv).order_by('created_at')  # type: ignore
+        serializer = ChatMessageSerializer(msgs, many=True)
+        return Response(serializer.data)
+    except Exception as e:
+        logger.error(f"Error fetching messages: {str(e)}")
+        return Response({'error': 'Failed to fetch messages'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+def post_chat_message(request, conversation_id):
+    """Send a new user message, generate assistant reply with citations, store both, and return answer & sources."""
+    try:
+        clerk_user_id = getattr(request, 'clerk_user_id', 'anonymous')
+        conv = get_object_or_404(Conversation, id=conversation_id)
+        if conv.clerk_user_id != clerk_user_id and clerk_user_id is not None:
+            return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+        
+        content = request.data.get('content', '').strip()
+        if not content:
+            return Response({'error': 'Content is required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Store user message
+        ChatMessage.objects.create(conversation=conv, role='user', content=content, citations=[], document_ids=[])  # type: ignore[attr-defined]
+        
+        # Retrieval using cosine similarity
+        similar_chunks = chromadb_service.search_similar_chunks(query=content, n_results=10)
+        
+        if not similar_chunks:
+            fallback_answer = "I couldn't find relevant information to answer your question from the indexed PDFs."
+            # Store assistant message with empty citations
+            ChatMessage.objects.create(  # type: ignore[attr-defined]
+                conversation=conv,
+                role='assistant',
+                content=fallback_answer,
+                citations=[],
+                document_ids=[]
+            )
+            if not conv.title:
+                conv.title = content[:80]
+                conv.save()
+            return Response({'answer': fallback_answer, 'sources': []})
+        
+        # Generate answer
+        result = gemini_service.search_and_answer(content, similar_chunks)
+        
+        # Augment sources with page numbers
+        augmented_sources = []
+        for src in result.get('sources', []):
+            try:
+                doc_id = src['document_id']
+                chunk_idx = src['chunk_index']
+                document = Document.objects.get(id=doc_id)  # type: ignore
+                
+                # Resolve full file path
+                if document.file_path.startswith('pdfs/') or document.file_path.startswith('pdfs\\'):
+                    relative_path = document.file_path.replace('\\', os.sep).replace('/', os.sep)
+                    full_path = os.path.join(settings.BASE_DIR, relative_path)
+                else:
+                    full_path = document.file_path
+                
+                matched_chunk = next((c for c in similar_chunks 
+                                      if c['metadata']['document_id'] == doc_id and 
+                                         c['metadata']['chunk_index'] == chunk_idx), None)
+                chunk_text = matched_chunk['text'] if matched_chunk else src.get('text_preview', '')
+                pages = pdf_service.find_text_pages(full_path, chunk_text)
+                page = pages[0] if pages else None
+                augmented_sources.append({**src, 'page': page})
+            except Exception:
+                augmented_sources.append(src)
+        
+        # Store assistant message
+        ChatMessage.objects.create(  # type: ignore[attr-defined]
+            conversation=conv,
+            role='assistant',
+            content=result.get('answer', ''),
+            citations=augmented_sources,
+            document_ids=[chunk['metadata']['document_id'] for chunk in similar_chunks]
+        )
+        
+        # Update conversation title if empty
+        if not conv.title:
+            conv.title = content[:80]
+            conv.save()
+        
+        return Response({'answer': result.get('answer', ''), 'sources': augmented_sources})
+    except Exception as e:
+        logger.error(f"Error posting chat message: {str(e)}")
+        return Response({'error': 'Failed to process message'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['DELETE'])
+def delete_chat_conversation(request, conversation_id):
+    """Delete a specific conversation and its messages for the authenticated user."""
+    try:
+        clerk_user_id = getattr(request, 'clerk_user_id', None)
+        if not clerk_user_id:
+            return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+        conv = get_object_or_404(Conversation, id=conversation_id, clerk_user_id=clerk_user_id)
+        conv.delete()
+        return Response({'message': 'Conversation deleted successfully'})
+    except Exception as e:
+        logger.error(f"Error deleting conversation: {str(e)}")
+        return Response({'error': 'Failed to delete conversation'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

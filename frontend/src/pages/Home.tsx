@@ -1,10 +1,12 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "@clerk/clerk-react";
 import { Header } from "@/components/Header";
-import { SearchBar } from "@/components/SearchBar";
 import { DocumentCard, Document } from "@/components/DocumentCard";
-import { apiService, Document as ApiDocument } from "@/lib/api";
+import { apiService, Document as ApiDocument, QueryResponse } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
+import { PDFModal } from "@/components/PDFModal";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 
 export default function Home() {
   const [documents, setDocuments] = useState<Document[]>([]);
@@ -13,6 +15,16 @@ export default function Home() {
   const [isSearching, setIsSearching] = useState(false);
   const { getToken } = useAuth();
   const { toast } = useToast();
+
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string; sources?: QueryResponse['sources'] }>>([]);
+  const [input, setInput] = useState<string>("");
+  const [isLoadingChat, setIsLoadingChat] = useState<boolean>(false);
+
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [modalDocId, setModalDocId] = useState<string>("");
+  const [modalDocTitle, setModalDocTitle] = useState<string>("");
+  const [modalInitialPage, setModalInitialPage] = useState<number | undefined>(undefined);
 
   // Load documents and favorites on component mount
   useEffect(() => {
@@ -24,29 +36,18 @@ export default function Home() {
     try {
       setLoading(true);
       const data = await apiService.getDocuments();
-      const formattedDocs = data.results.map((doc: ApiDocument) => ({
-        id: doc.id,
-        title: doc.title || doc.filename,
-        summary: doc.summary || "No summary available",
-        isFavorite: false, // Will be updated when we load favorites
+      const formattedDocs = data.results.map((apiDoc: ApiDocument) => ({
+        id: apiDoc.id,
+        title: apiDoc.title || apiDoc.filename,
+        summary: apiDoc.summary || "No summary available",
+        isFavorite: false,
       }));
-      
-      // Remove duplicates based on ID
-      const uniqueDocs = formattedDocs.filter((doc, index, self) => 
-        index === self.findIndex(d => d.id === doc.id)
-      );
-      
+      const uniqueDocs = formattedDocs.filter((doc, index, self) => index === self.findIndex(d => d.id === doc.id));
       setDocuments(uniqueDocs);
     } catch (error) {
       console.error('Error loading documents:', error);
-      toast({
-        title: "Error",
-        description: "Failed to load documents. Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
+      toast({ title: "Error", description: "Failed to load documents. Please try again.", variant: "destructive" });
+    } finally { setLoading(false); }
   };
 
   const loadFavorites = async () => {
@@ -54,141 +55,169 @@ export default function Home() {
       const token = await getToken();
       const favorites = await apiService.getFavorites(token || undefined);
       const favoriteIds = new Set(favorites.map(fav => fav.document.id));
-      
-      // Update documents with favorite status
-      setDocuments(prev => 
-        prev.map(doc => ({
-          ...doc,
-          isFavorite: favoriteIds.has(doc.id)
-        }))
-      );
-      
-      // Update search results with favorite status
-      setSearchResults(prev => 
-        prev.map(doc => ({
-          ...doc,
-          isFavorite: favoriteIds.has(doc.id)
-        }))
-      );
+      setDocuments(prev => prev.map(doc => ({ ...doc, isFavorite: favoriteIds.has(doc.id) })));
+      setSearchResults(prev => prev.map(doc => ({ ...doc, isFavorite: favoriteIds.has(doc.id) })));
     } catch (error) {
-      console.error('Error loading favorites:', error);
-      // Silently ignore favorites errors - user might not be authenticated
+      console.log('Favorites check skipped (user not authenticated)');
     }
   };
-
-  const handleSearch = async (query: string) => {
-    if (!query.trim()) {
-      setSearchResults([]);
-      setIsSearching(false);
-      return;
-    }
-
-    try {
-      setIsSearching(true);
-      console.log('Performing search:', query);
-      
-      // Get token for search history tracking
-      const token = await getToken();
-      console.log('Search with token:', !!token);
-      
-      const response = await apiService.searchDocuments(query, 10, token || undefined);
-      console.log('Search response:', response);
-      const formattedResults = response.results.map((result) => ({
-        id: result.document.id,
-        title: result.document.title || result.document.filename,
-        summary: result.document.summary || "No summary available",
-        isFavorite: false,
-      }));
-      
-      // Remove duplicates based on ID
-      const uniqueResults = formattedResults.filter((doc, index, self) => 
-        index === self.findIndex(d => d.id === doc.id)
-      );
-      
-      setSearchResults(uniqueResults);
-      console.log('Search completed, results:', uniqueResults.length);
-    } catch (error) {
-      console.error('Error searching documents:', error);
-      toast({
-        title: "Search Error",
-        description: "Failed to search documents. Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsSearching(false);
-    }
-  };
-
-
 
   const handleToggleFavorite = async (doc: Document) => {
     try {
       const token = await getToken();
       if (!token) {
-        toast({
-          title: "Authentication Required",
-          description: "Please sign in to manage favorites.",
-          variant: "destructive",
-        });
+        toast({ title: "Authentication Required", description: "Please sign in to manage favorites.", variant: "destructive" });
         return;
       }
-
-      if (doc.isFavorite) {
-        await apiService.removeFavorite(doc.id, token);
-      } else {
-        await apiService.addFavorite(doc.id, token);
-      }
-
-      // Update local state
-      const updatedFavoriteStatus = !doc.isFavorite;
-      setDocuments((prev) =>
-        prev.map((d) =>
-          d.id === doc.id ? { ...d, isFavorite: updatedFavoriteStatus } : d
-        )
-      );
-      setSearchResults((prev) =>
-        prev.map((d) =>
-          d.id === doc.id ? { ...d, isFavorite: updatedFavoriteStatus } : d
-        )
-      );
-
-      toast({
-        title: updatedFavoriteStatus ? "Added to Favorites" : "Removed from Favorites",
-        description: `"${doc.title}" has been ${updatedFavoriteStatus ? 'added to' : 'removed from'} your favorites.`,
-      });
+      if (doc.isFavorite) await apiService.removeFavorite(doc.id, token); else await apiService.addFavorite(doc.id, token);
+      const updated = !doc.isFavorite;
+      setDocuments(prev => prev.map(d => d.id === doc.id ? { ...d, isFavorite: updated } : d));
+      setSearchResults(prev => prev.map(d => d.id === doc.id ? { ...d, isFavorite: updated } : d));
+      toast({ title: updated ? "Added to Favorites" : "Removed from Favorites", description: `"${doc.title}" has been ${updated ? 'added to' : 'removed from'} your favorites.` });
     } catch (error) {
       console.error('Error toggling favorite:', error);
-      toast({
-        title: "Error",
-        description: "Failed to update favorites. Please try again.",
-        variant: "destructive",
-      });
+      toast({ title: "Error", description: "Failed to update favorites. Please try again.", variant: "destructive" });
     }
+  };
+
+  const ensureConversation = async () => {
+    if (conversationId) return conversationId;
+    const token = await getToken();
+    const resp = await apiService.createConversation(token || undefined);
+    setConversationId(resp.conversation_id);
+    return resp.conversation_id;
+  };
+
+  const sendMessage = async () => {
+    if (!input.trim() || isLoadingChat) return;
+    const userMsg = { role: 'user' as const, content: input };
+    setMessages(prev => [...prev, userMsg]);
+    const content = input;
+    setInput("");
+    setIsLoadingChat(true);
+    try {
+      const convId = await ensureConversation();
+      const token = await getToken();
+      const resp = await apiService.sendChatMessage(convId!, content, token || undefined);
+      const assistantMsg = { role: 'assistant' as const, content: resp.answer, sources: resp.sources };
+      setMessages(prev => [...prev, assistantMsg]);
+    } catch (error) {
+      console.error('Error sending chat message:', error);
+      setMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, something went wrong. Please try again.' }]);
+    } finally { setIsLoadingChat(false); }
+  };
+
+  const openCitationModal = (sourceIndex: number) => {
+    const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant' && m.sources && m.sources.length > 0);
+    const src = lastAssistant?.sources?.[sourceIndex];
+    if (!src) return;
+    setModalDocId(src.document_id);
+    const meta = documents.find(d => d.id === src.document_id);
+    setModalDocTitle(meta?.title || 'Document');
+    setModalInitialPage(src.page);
+    setIsModalOpen(true);
   };
 
   return (
     <div className="min-h-screen bg-background">
       <Header />
-
       <main className="container mx-auto px-4 py-12">
-        {/* Hero Section */}
-        <div className="text-center mb-12">
-          <h1 className="text-4xl md:text-5xl font-bold mb-4">
-            Your AI-Powered Pdf Hub
-          </h1>
-          <p className="text-lg text-muted-foreground mb-8 max-w-2xl mx-auto">
-            Search, analyze, and interact with your Pdfs using advanced AI technology
-          </p>
-          <SearchBar onSearch={handleSearch} />
+        {/* Intro */}
+        <div className="text-center mb-8">
+          <h1 className="text-4xl md:text-5xl font-bold mb-4">Your AI-Powered Pdf Hub</h1>
+          <p className="text-lg text-muted-foreground mb-2 max-w-2xl mx-auto">Chat to ask questions across all PDFs. Answers include citations that open at the exact page.</p>
         </div>
 
+        {/* Chat Thread */}
+        <div className="max-w-4xl mx-auto mb-8">
+          <div className="border rounded-lg bg-card">
+            <div className="p-6 space-y-6">
+              {messages.length === 0 && (
+                <div className="text-center text-muted-foreground py-8">
+                  <p>Start by asking a question about your PDFs.</p>
+                </div>
+              )}
+              {messages.map((m, idx) => (
+                <div key={idx} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-[85%] rounded-lg p-4 ${m.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground'}`}>
+                    <p className="whitespace-pre-wrap">{m.content}</p>
+                    {m.role === 'assistant' && m.sources && m.sources.length > 0 && (
+                      <div className="mt-3">
+                        <span className="text-xs text-muted-foreground mr-2">Citations:</span>
+                        <div className="flex flex-wrap gap-2">
+                          {m.sources.map((_, sIdx) => (
+                            <Button key={sIdx} size="sm" variant="outline" onClick={() => openCitationModal(sIdx)}>
+                              [{sIdx + 1}]
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Chat Input */}
+            <div className="border-t p-6">
+              <div className="flex gap-3">
+                <Textarea
+                  placeholder="Ask anything about your PDFs..."
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      sendMessage();
+                    }
+                  }}
+                  className="flex-1 min-h-[48px] text-base"
+                  disabled={isLoadingChat}
+                />
+                <Button onClick={sendMessage} size="lg" disabled={isLoadingChat || !input.trim()} className="px-6">
+                  {isLoadingChat ? (
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                  ) : (
+                    <span>Send</span>
+                  )}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground mt-2">Press Enter to send, Shift+Enter for new line</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Sources from last assistant message */}
+        {(() => {
+          const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant' && m.sources && m.sources.length > 0);
+          const sources = lastAssistant?.sources || [];
+          return sources.length > 0 ? (
+            <div className="mb-12 max-w-4xl mx-auto">
+              <h2 className="text-2xl font-semibold mb-6">Sources</h2>
+              <div className="space-y-4">
+                {sources.map((src, idx) => (
+                  <div key={`${src.document_id}-${src.chunk_index}`} className="border rounded-lg p-4 bg-card">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1">
+                        <div className="text-sm text-muted-foreground mb-1">Source [{idx + 1}]</div>
+                        <p className="text-sm leading-relaxed">{src.text_preview}</p>
+                        <div className="mt-2 text-xs text-muted-foreground">Similarity: {(src.score * 100).toFixed(1)}%{src.page ? ` • Page ${src.page}` : ''}</div>
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <Button variant="outline" size="sm" onClick={() => window.location.assign(`/document/${src.document_id}`)}>Open in Document Page</Button>
+                        <Button variant="outline" size="sm" onClick={() => openCitationModal(idx)}>Open Preview</Button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null;
+        })()}
 
         {/* Documents Grid */}
         <div className="mt-12">
-          <h2 className="text-2xl font-semibold mb-6">
-            {isSearching ? "Searching..." : searchResults.length > 0 ? "Search Results" : "Recent Documents"}
-          </h2>
-          
+          <h2 className="text-2xl font-semibold mb-6">Recent Documents</h2>
           {loading ? (
             <div className="text-center py-12">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
@@ -197,15 +226,10 @@ export default function Home() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {(searchResults.length > 0 ? searchResults : documents).map((doc) => (
-                <DocumentCard
-                  key={doc.id}
-                  document={doc}
-                  onToggleFavorite={handleToggleFavorite}
-                />
+                <DocumentCard key={doc.id} document={doc} onToggleFavorite={handleToggleFavorite} />
               ))}
             </div>
           )}
-          
           {!loading && documents.length === 0 && (
             <div className="text-center py-12">
               <p className="text-muted-foreground">No documents found. Please add some PDF files to the backend.</p>
@@ -213,6 +237,9 @@ export default function Home() {
           )}
         </div>
       </main>
+
+      {/* Citation Modal */}
+      <PDFModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} documentTitle={modalDocTitle} documentId={modalDocId} initialPage={modalInitialPage} />
     </div>
   );
 }

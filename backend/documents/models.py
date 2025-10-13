@@ -3,6 +3,7 @@ Models for the documents app.
 """
 from django.db import models
 from django.utils import timezone
+import uuid
 
 
 class Document(models.Model):
@@ -70,3 +71,36 @@ class SearchHistory(models.Model):
     
     def __str__(self) -> str:
         return f"Search by {self.clerk_user_id}: {self.search_query[:50]}..."  # type: ignore
+
+
+class Conversation(models.Model):
+    """Chat conversation associated with a Clerk user."""
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    clerk_user_id = models.CharField(max_length=255)
+    title = models.CharField(max_length=500, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['-updated_at']
+    
+    def __str__(self) -> str:
+        return f"Conversation {self.id} ({self.clerk_user_id})"  # type: ignore
+
+
+class ChatMessage(models.Model):
+    """Chat message for a conversation."""
+    
+    conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name='messages')
+    role = models.CharField(max_length=20)  # 'user' or 'assistant'
+    content = models.TextField()
+    citations = models.JSONField(default=list)  # Array of {document_id, chunk_index, score, text_preview, page}
+    document_ids = models.JSONField(default=list)  # Context documents used
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['created_at']
+    
+    def __str__(self) -> str:
+        return f"{self.role} message in {self.conversation_id}: {self.content[:50]}..."  # type: ignore

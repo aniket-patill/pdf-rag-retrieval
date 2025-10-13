@@ -14,4 +14,11 @@ urlpatterns = [
     path('history/', views.get_search_history, name='get_search_history'),
     path('history/debug/', views.debug_search_history, name='debug_search_history'),
     path('history/<int:history_id>/', views.delete_search_history_item, name='delete_search_history_item'),
+
+    # Chat endpoints
+    path('chat/conversations/', views.create_chat_conversation, name='create_chat_conversation'),
+    path('chat/conversations/list/', views.list_chat_conversations, name='list_chat_conversations'),
+    path('chat/conversations/<str:conversation_id>/messages/', views.get_chat_messages, name='get_chat_messages'),
+    path('chat/conversations/<str:conversation_id>/message/', views.post_chat_message, name='post_chat_message'),
+    path('chat/conversations/<str:conversation_id>/delete/', views.delete_chat_conversation, name='delete_chat_conversation'),
 ]
