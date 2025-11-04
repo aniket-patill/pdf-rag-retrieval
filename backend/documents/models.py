@@ -1,18 +1,15 @@
-"""
-Models for the documents app.
-"""
 from django.db import models
 from django.utils import timezone
 import uuid
 
 
 class Document(models.Model):
-    """Model representing a PDF document."""
     
     id = models.CharField(max_length=255, primary_key=True)
     title = models.CharField(max_length=500)
     filename = models.CharField(max_length=500)
     file_path = models.CharField(max_length=1000)
+    clerk_user_id = models.CharField(max_length=255, blank=True, null=True)  # Track which user uploaded the document
     summary = models.TextField(blank=True, null=True)
     summary_generated_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -26,7 +23,6 @@ class Document(models.Model):
 
 
 class DocumentChunk(models.Model):
-    """Model representing a text chunk from a document."""
     
     document = models.ForeignKey(Document, on_delete=models.CASCADE, related_name='chunks')
     chunk_index = models.IntegerField()
@@ -43,12 +39,11 @@ class DocumentChunk(models.Model):
 
 
 class QueryHistory(models.Model):
-    """Model for storing user query history."""
     
     clerk_user_id = models.CharField(max_length=255)
     query = models.TextField()
     response = models.TextField()
-    document_ids = models.JSONField(default=list)  # List of document IDs used for context
+    document_ids = models.JSONField(default=list)
     created_at = models.DateTimeField(auto_now_add=True)
     
     class Meta:
@@ -59,11 +54,10 @@ class QueryHistory(models.Model):
 
 
 class SearchHistory(models.Model):
-    """Model for storing user search history."""
     
     clerk_user_id = models.CharField(max_length=255)
     search_query = models.TextField()
-    results_count = models.IntegerField(default=0)  # type: ignore
+    results_count = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     
     class Meta:
@@ -74,7 +68,6 @@ class SearchHistory(models.Model):
 
 
 class Conversation(models.Model):
-    """Chat conversation associated with a Clerk user."""
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     clerk_user_id = models.CharField(max_length=255)
@@ -90,13 +83,12 @@ class Conversation(models.Model):
 
 
 class ChatMessage(models.Model):
-    """Chat message for a conversation."""
     
     conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name='messages')
-    role = models.CharField(max_length=20)  # 'user' or 'assistant'
+    role = models.CharField(max_length=20)
     content = models.TextField()
-    citations = models.JSONField(default=list)  # Array of {document_id, chunk_index, score, text_preview, page}
-    document_ids = models.JSONField(default=list)  # Context documents used
+    citations = models.JSONField(default=list)
+    document_ids = models.JSONField(default=list)
     created_at = models.DateTimeField(auto_now_add=True)
     
     class Meta:

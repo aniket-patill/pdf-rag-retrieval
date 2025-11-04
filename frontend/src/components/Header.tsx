@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
-import { FileText, History, Heart, LogOut } from "lucide-react";
+import { FileText, History, Heart, Upload, LogOut } from "lucide-react";
 import { ThemeToggle } from "./ThemeToggle";
 import { Button } from "@/components/ui/button";
 import { UserButton, useUser } from "@clerk/clerk-react";
@@ -26,6 +26,14 @@ export function Header() {
           >
             <FileText className="h-4 w-4 mr-2" />
             Documents
+          </Button>
+          <Button
+            variant="ghost"
+            onClick={() => navigate("/upload")}
+            className="hover:bg-surface-hover"
+          >
+            <Upload className="h-4 w-4 mr-2" />
+            Upload
           </Button>
           <Button
             variant="ghost"

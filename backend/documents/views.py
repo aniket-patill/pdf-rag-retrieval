@@ -1,7 +1,5 @@
-"""
-Views for the documents app.
-"""
 import os
+from pathlib import Path
 from django.conf import settings
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -36,7 +34,6 @@ gemini_service = GeminiService(settings.GEMINI_API_KEY)
 
 @api_view(['GET'])
 def list_documents(request):
-    """List all documents with optional pagination."""
     documents = Document.objects.all()  # type: ignore
     
     # Pagination
@@ -50,7 +47,6 @@ def list_documents(request):
 
 @api_view(['GET'])
 def get_document_summary(request, document_id):
-    """Get or generate summary for a document."""
     try:
         document = get_object_or_404(Document, id=document_id)
         
@@ -73,7 +69,7 @@ def get_document_summary(request, document_id):
             
             # Combine chunks for summary
             full_text = " ".join([chunk.text for chunk in chunks])
-            summary = gemini_service.generate_summary(full_text, document.title or document.filename)
+            summary = gemini_service.generate_summary(full_text, document.title or document.filename, max_length=1000)
             
             # Update document
             document.summary = summary
@@ -95,9 +91,7 @@ def get_document_summary(request, document_id):
 
 @api_view(['POST'])
 def query_documents(request):
-    """Answer user questions based on document context."""
     try:
-        # For testing, we'll skip authentication temporarily
         clerk_user_id = getattr(request, 'clerk_user_id', 'anonymous')
         
         serializer = QuerySerializer(data=request.data)
@@ -107,11 +101,32 @@ def query_documents(request):
         query = serializer.validated_data['query']  # type: ignore
         document_ids = serializer.validated_data.get('document_ids', [])  # type: ignore
         
+        # Only limit search to user's documents if explicitly requested via document_ids parameter
+        # or if the user wants to search only their own documents (new parameter)
+        search_user_documents_only = request.data.get('user_documents_only', False)
+        
+        if search_user_documents_only and clerk_user_id and clerk_user_id != 'anonymous':
+            # Limit search to user's documents only
+            user_documents = Document.objects.filter(clerk_user_id=clerk_user_id)  # type: ignore
+            document_ids = [doc.id for doc in user_documents]
+            logger.info(f"Limiting search to {len(document_ids)} user documents for user {clerk_user_id}")
+        elif document_ids:
+            # Use the provided document IDs
+            logger.info(f"Searching within {len(document_ids)} specified documents")
+        else:
+            # Search across all documents (default behavior)
+            logger.info("Searching across all documents")
+            document_ids = None  # None means search all documents
+        
         # Search for relevant chunks
-        similar_chunks = chromadb_service.search_similar_chunks(
+        similar_chunks = chromadb_service.hybrid_search(
             query=query,
-            n_results=10,
-            document_ids=document_ids if document_ids else None
+            n_results=5,
+            top_k=50,
+            epsilon=0.02,
+            include_tfidf=True,
+            document_ids=document_ids,
+            unique_citations=True
         )
         
         if not similar_chunks:
@@ -176,7 +191,6 @@ def query_documents(request):
 
 @api_view(['POST'])
 def search_documents(request):
-    """Search for documents and chunks based on query."""
     try:
         serializer = SearchSerializer(data=request.data)
         if not serializer.is_valid():
@@ -186,9 +200,14 @@ def search_documents(request):
         limit = serializer.validated_data['limit']  # type: ignore
         
         # Search for similar chunks
-        similar_chunks = chromadb_service.search_similar_chunks(
+        similar_chunks = chromadb_service.hybrid_search(
             query=query,
-            n_results=limit
+            n_results=limit,
+            top_k=50,
+            epsilon=0.02,
+            include_tfidf=False,
+            document_ids=None,
+            unique_citations=False
         )
         
         # Format results
@@ -198,7 +217,7 @@ def search_documents(request):
                 document = Document.objects.get(id=chunk['metadata']['document_id'])  # type: ignore
                 results.append({
                     'document': DocumentSerializer(document).data,
-                    'score': chunk['score'],
+                    'score': chunk.get('semantic_score', chunk.get('score', 0)),
                     'chunk_text': chunk['text'],
                     'chunk_index': chunk['metadata']['chunk_index']
                 })
@@ -231,7 +250,6 @@ def search_documents(request):
 
 @api_view(['GET'])
 def get_document_details(request, document_id):
-    """Get detailed information about a specific document."""
     try:
         document = get_object_or_404(Document, id=document_id)
         serializer = DocumentSerializer(document)
@@ -247,7 +265,6 @@ def get_document_details(request, document_id):
 
 @api_view(['GET'])
 def get_search_history(request):
-    """Get user's search history."""
     try:
         # Get clerk_user_id from middleware or default for testing
         clerk_user_id = getattr(request, 'clerk_user_id', None)
@@ -285,7 +302,6 @@ def get_search_history(request):
 
 @api_view(['GET'])
 def debug_search_history(request):
-    """Debug endpoint to see all search history entries."""
     try:
         # Get all entries for debugging
         all_history = SearchHistory.objects.all().order_by('-created_at')[:20]  # type: ignore
@@ -314,7 +330,6 @@ def debug_search_history(request):
 
 @api_view(['DELETE'])
 def delete_search_history_item(request, history_id):
-    """Delete a specific search history item."""
     try:
         # Get clerk_user_id from middleware
         clerk_user_id = getattr(request, 'clerk_user_id', None)
@@ -337,7 +352,6 @@ def delete_search_history_item(request, history_id):
 
 @api_view(['GET', 'HEAD', 'OPTIONS'])
 def serve_document_file(request, document_id):
-    """Serve the PDF file for a document."""
     # Handle CORS preflight requests
     if request.method == 'OPTIONS':
         response = Response()
@@ -388,7 +402,6 @@ def serve_document_file(request, document_id):
 # Chat endpoints
 @api_view(['POST'])
 def create_chat_conversation(request):
-    """Create a new conversation and return its ID."""
     try:
         clerk_user_id = getattr(request, 'clerk_user_id', 'anonymous')
         title = request.data.get('title')
@@ -401,7 +414,6 @@ def create_chat_conversation(request):
 
 @api_view(['GET'])
 def list_chat_conversations(request):
-    """List recent conversations for the user."""
     try:
         clerk_user_id = getattr(request, 'clerk_user_id', None)
         if not clerk_user_id:
@@ -416,7 +428,6 @@ def list_chat_conversations(request):
 
 @api_view(['GET'])
 def get_chat_messages(request, conversation_id):
-    """Fetch messages for a conversation."""
     try:
         clerk_user_id = getattr(request, 'clerk_user_id', None)
         conv = get_object_or_404(Conversation, id=conversation_id)
@@ -432,7 +443,6 @@ def get_chat_messages(request, conversation_id):
 
 @api_view(['POST'])
 def post_chat_message(request, conversation_id):
-    """Send a new user message, generate assistant reply with citations, store both, and return answer & sources."""
     try:
         clerk_user_id = getattr(request, 'clerk_user_id', 'anonymous')
         conv = get_object_or_404(Conversation, id=conversation_id)
@@ -447,7 +457,28 @@ def post_chat_message(request, conversation_id):
         ChatMessage.objects.create(conversation=conv, role='user', content=content, citations=[], document_ids=[])  # type: ignore[attr-defined]
         
         # Retrieval using cosine similarity
-        similar_chunks = chromadb_service.search_similar_chunks(query=content, n_results=10)
+        # Only limit search to user's documents if explicitly requested
+        search_user_documents_only = request.data.get('user_documents_only', False)
+        document_ids = None
+        
+        if search_user_documents_only and clerk_user_id and clerk_user_id != 'anonymous':
+            # Get document IDs for this user
+            user_documents = Document.objects.filter(clerk_user_id=clerk_user_id)  # type: ignore
+            document_ids = [doc.id for doc in user_documents]
+            logger.info(f"Searching within {len(document_ids)} user documents for user {clerk_user_id}")
+        else:
+            # Search across all documents (default behavior)
+            logger.info("Searching across all documents in chat")
+        
+        similar_chunks = chromadb_service.hybrid_search(
+            query=content, 
+            n_results=5, 
+            top_k=50, 
+            epsilon=0.02, 
+            include_tfidf=True, 
+            document_ids=document_ids,  # Filter by user's documents only if requested
+            unique_citations=True
+        )
         
         if not similar_chunks:
             fallback_answer = "I couldn't find relevant information to answer your question from the indexed PDFs."
@@ -514,7 +545,6 @@ def post_chat_message(request, conversation_id):
 
 @api_view(['DELETE'])
 def delete_chat_conversation(request, conversation_id):
-    """Delete a specific conversation and its messages for the authenticated user."""
     try:
         clerk_user_id = getattr(request, 'clerk_user_id', None)
         if not clerk_user_id:
@@ -525,3 +555,214 @@ def delete_chat_conversation(request, conversation_id):
     except Exception as e:
         logger.error(f"Error deleting conversation: {str(e)}")
         return Response({'error': 'Failed to delete conversation'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+def upload_pdf(request):
+    try:
+        # Check authentication like other views
+        clerk_user_id = getattr(request, 'clerk_user_id', None)
+        logger.info(f"Upload request - clerk_user_id: {clerk_user_id}")
+        
+        if not clerk_user_id:
+            return Response(
+                {'error': 'Authentication required'}, 
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        
+        if 'file' not in request.FILES:
+            return Response(
+                {'error': 'No file provided'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        uploaded_file = request.FILES['file']
+        
+        # Validate file type
+        if not uploaded_file.name.endswith('.pdf'):
+            return Response(
+                {'error': 'Only PDF files are allowed'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Validate file size (limit to 10MB as requested)
+        if uploaded_file.size > 10 * 1024 * 1024:
+            return Response(
+                {'error': 'File size exceeds 10MB limit'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Validate minimum file size (100KB)
+        if uploaded_file.size < 100 * 1024:
+            return Response(
+                {'error': 'File size must be at least 100KB'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Create user-specific directory
+        user_pdfs_path = os.path.join(settings.PDFS_PATH, clerk_user_id)
+        os.makedirs(user_pdfs_path, exist_ok=True)
+        
+        # Save file
+        file_path = os.path.join(user_pdfs_path, uploaded_file.name)
+        
+        # Handle duplicate filenames
+        counter = 1
+        original_name = uploaded_file.name
+        name, ext = os.path.splitext(original_name)
+        while os.path.exists(file_path):
+            new_name = f"{name}_{counter}{ext}"
+            file_path = os.path.join(user_pdfs_path, new_name)
+            counter += 1
+        
+        with open(file_path, 'wb+') as destination:
+            for chunk in uploaded_file.chunks():
+                destination.write(chunk)
+        
+        # Process the PDF using existing ingestion logic
+        pdf_service = PDFService(settings.PDFS_PATH)
+        embedding_service = EmbeddingService()
+        chromadb_service = ChromaDBService(settings.CHROMADB_PATH)
+        
+        # Generate document ID from file hash
+        document_id = pdf_service.get_file_hash(Path(file_path))
+        
+        # Check if document already exists
+        if Document.objects.filter(id=document_id).exists():  # type: ignore
+            # Clean up uploaded file since it's a duplicate
+            os.remove(file_path)
+            return Response(
+                {'error': 'This document has already been uploaded'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Extract text and metadata
+        text, doc_info = pdf_service.process_pdf(Path(file_path))
+        
+        if not text.strip():
+            # Clean up uploaded file since it has no text
+            os.remove(file_path)
+            return Response(
+                {'error': 'No text could be extracted from this PDF'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Create document record
+        document = Document.objects.create(  # type: ignore
+            id=document_id,
+            title=doc_info['title'],
+            filename=os.path.basename(file_path),
+            file_path=file_path,
+            clerk_user_id=clerk_user_id,
+        )
+        
+        # Split text into chunks
+        chunks = embedding_service.split_text_into_chunks(text)
+        
+        if not chunks:
+            # Clean up if no chunks created
+            document.delete()
+            os.remove(file_path)
+            return Response(
+                {'error': 'Could not process this PDF into searchable chunks'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Save chunks to database
+        chunk_objects = []
+        for chunk in chunks:
+            chunk_obj = DocumentChunk.objects.create(  # type: ignore
+                document=document,
+                chunk_index=chunk['chunk_index'],
+                text=chunk['text'],
+                embedding_id=embedding_service.create_chunk_embedding_id(
+                    document_id, chunk['chunk_index']
+                )
+            )
+            chunk_objects.append(chunk_obj)
+        
+        # Add chunks to ChromaDB
+        chromadb_service.add_document_chunks(document_id, chunks)
+        
+        # Generate document summary automatically
+        try:
+            # Combine chunks for summary
+            full_text = " ".join([chunk['text'] for chunk in chunks])
+            summary = gemini_service.generate_summary(full_text, document.title or document.filename, max_length=1000)
+            
+            # Update document with summary
+            document.summary = summary
+            document.summary_generated_at = timezone.now()
+            document.save()
+        except Exception as e:
+            logger.error(f"Error generating summary for document {document_id}: {str(e)}")
+            # Don't fail the upload if summary generation fails
+            pass
+        
+        # Return success response
+        serializer = DocumentSerializer(document)
+        return Response({
+            'message': 'PDF uploaded and processed successfully',
+            'document': serializer.data
+        }, status=status.HTTP_201_CREATED)
+        
+    except Exception as e:
+        logger.error(f"Error uploading PDF: {str(e)}")
+        return Response(
+            {'error': 'Failed to upload PDF'}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['GET'])
+def list_user_documents(request):
+    """List documents uploaded by the current user"""
+    try:
+        clerk_user_id = getattr(request, 'clerk_user_id', None)
+        logger.info(f"List user documents request - clerk_user_id: {clerk_user_id}")
+        
+        if not clerk_user_id:
+            return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        documents = Document.objects.filter(clerk_user_id=clerk_user_id)  # type: ignore
+        serializer = DocumentSerializer(documents, many=True)
+        return Response(serializer.data)
+    except Exception as e:
+        logger.error(f"Error listing user documents: {str(e)}")
+        return Response({'error': 'Failed to list documents'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['DELETE'])
+def delete_document(request, document_id):
+    """Delete a document and its associated files"""
+    try:
+        clerk_user_id = getattr(request, 'clerk_user_id', None)
+        logger.info(f"Delete document request - clerk_user_id: {clerk_user_id}, document_id: {document_id}")
+        
+        if not clerk_user_id:
+            return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        document = get_object_or_404(Document, id=document_id)
+        
+        # Check if document belongs to user
+        if document.clerk_user_id != clerk_user_id:
+            return Response({'error': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+        
+        # Delete associated chunks from database
+        DocumentChunk.objects.filter(document=document).delete()  # type: ignore
+        
+        # Delete chunks from ChromaDB
+        chromadb_service = ChromaDBService(settings.CHROMADB_PATH)
+        chromadb_service.delete_document_chunks(document_id)
+        
+        # Delete file from filesystem
+        if os.path.exists(document.file_path):
+            os.remove(document.file_path)
+        
+        # Delete document record
+        document.delete()
+        
+        return Response({'message': 'Document deleted successfully'}, status=status.HTTP_200_OK)
+    except Exception as e:
+        logger.error(f"Error deleting document: {str(e)}")
+        return Response({'error': 'Failed to delete document'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

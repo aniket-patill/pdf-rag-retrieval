@@ -1,12 +1,8 @@
-"""
-Serializers for the documents app.
-"""
 from rest_framework import serializers
 from .models import Document, QueryHistory, SearchHistory, Conversation, ChatMessage
 
 
 class DocumentSerializer(serializers.ModelSerializer):
-    """Serializer for Document model."""
     
     class Meta:
         model = Document
@@ -14,23 +10,21 @@ class DocumentSerializer(serializers.ModelSerializer):
 
 
 class DocumentSummarySerializer(serializers.Serializer):
-    """Serializer for document summary requests."""
     summary = serializers.CharField(read_only=True)
     generated_at = serializers.DateTimeField(read_only=True)
 
 
 class QuerySerializer(serializers.Serializer):
-    """Serializer for query requests."""
     query = serializers.CharField(max_length=1000)
     document_ids = serializers.ListField(
         child=serializers.CharField(max_length=255),
         required=False,
         allow_empty=True
     )
+    user_documents_only = serializers.BooleanField(required=False, default=False)  # type: ignore
 
 
 class QueryResponseSerializer(serializers.Serializer):
-    """Serializer for query responses."""
     response = serializers.CharField()
     sources = serializers.ListField(
         child=serializers.DictField(),
@@ -39,13 +33,11 @@ class QueryResponseSerializer(serializers.Serializer):
 
 
 class SearchSerializer(serializers.Serializer):
-    """Serializer for search requests."""
     query = serializers.CharField(max_length=500)
     limit = serializers.IntegerField(default=10, min_value=1, max_value=50)
 
 
 class SearchResultSerializer(serializers.Serializer):
-    """Serializer for search results."""
     document = DocumentSerializer()
     score = serializers.FloatField()
     chunk_text = serializers.CharField()
@@ -53,7 +45,6 @@ class SearchResultSerializer(serializers.Serializer):
 
 
 class QueryHistorySerializer(serializers.ModelSerializer):
-    """Serializer for QueryHistory model."""
     
     class Meta:
         model = QueryHistory
@@ -62,7 +53,6 @@ class QueryHistorySerializer(serializers.ModelSerializer):
 
 
 class SearchHistorySerializer(serializers.ModelSerializer):
-    """Serializer for SearchHistory model."""
     
     class Meta:
         model = SearchHistory
@@ -71,7 +61,6 @@ class SearchHistorySerializer(serializers.ModelSerializer):
 
 
 class ConversationSerializer(serializers.ModelSerializer):
-    """Serializer for Conversation model."""
 
     class Meta:
         model = Conversation
@@ -80,7 +69,6 @@ class ConversationSerializer(serializers.ModelSerializer):
 
 
 class ChatMessageSerializer(serializers.ModelSerializer):
-    """Serializer for ChatMessage model."""
 
     class Meta:
         model = ChatMessage

@@ -23,8 +23,6 @@ export default function DocumentPage() {
   const [isFavorite, setIsFavorite] = useState(false);
   const [isAIOpen, setIsAIOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("viewer");
-  
-  // Chat state
   const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -43,7 +41,6 @@ export default function DocumentPage() {
       
       if (doc) {
         setDocument(doc);
-        // Check if document is in favorites (only if user is authenticated)
         await loadFavoriteStatus();
       } else {
         toast({
@@ -74,7 +71,6 @@ export default function DocumentPage() {
         setIsFavorite(isFav);
       }
     } catch (error) {
-      // Silently ignore favorites errors - user might not be authenticated
       console.log('Favorites check skipped (user not authenticated)');
     }
   };
@@ -118,7 +114,6 @@ export default function DocumentPage() {
 
   const handleDownload = () => {
     if (document && documentId) {
-      // Create a temporary link element to trigger download
       const link = window.document.createElement('a');
       link.href = apiService.getDocumentFileUrl(documentId);
       link.download = document.filename || `document-${documentId}.pdf`;

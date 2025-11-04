@@ -1,6 +1,3 @@
-"""
-Management command to generate summaries for all documents.
-"""
 import logging
 from django.core.management.base import BaseCommand
 from django.conf import settings
@@ -27,12 +24,11 @@ class Command(BaseCommand):
         )
     
     def handle(self, *args, **options):
-        """Handle the command execution."""
         force = options['force']
         document_id = options.get('document_id')
         
         self.stdout.write(
-            self.style.SUCCESS('Starting summary generation...')
+            self.style.SUCCESS('Starting summary generation...')  # type: ignore
         )
         
         try:
@@ -40,7 +36,7 @@ class Command(BaseCommand):
             api_key = settings.GEMINI_API_KEY
             if not api_key:
                 self.stdout.write(
-                    self.style.ERROR('GEMINI_API_KEY not configured in settings')
+                    self.style.ERROR('GEMINI_API_KEY not configured in settings')  # type: ignore
                 )
                 return
             
@@ -49,21 +45,21 @@ class Command(BaseCommand):
             
             # Get documents to process
             if document_id:
-                documents = Document.objects.filter(id=document_id)
+                documents = Document.objects.filter(id=document_id)  # type: ignore
                 if not documents.exists():
                     self.stdout.write(
-                        self.style.ERROR(f'Document with ID {document_id} not found')
+                        self.style.ERROR(f'Document with ID {document_id} not found')  # type: ignore
                     )
                     return
             else:
                 if force:
-                    documents = Document.objects.all()
+                    documents = Document.objects.all()  # type: ignore
                 else:
-                    documents = Document.objects.filter(summary__isnull=True)
+                    documents = Document.objects.filter(summary__isnull=True)  # type: ignore
             
             if not documents.exists():
                 self.stdout.write(
-                    self.style.WARNING('No documents found to process')
+                    self.style.WARNING('No documents found to process')  # type: ignore
                 )
                 return
             
@@ -85,18 +81,18 @@ class Command(BaseCommand):
                     self.stdout.write(f'Generating summary for {document.filename}...')
                     
                     # Get document text from chunks
-                    chunks = document.chunks.all().order_by('chunk_index')
+                    chunks = document.chunks.all().order_by('chunk_index')  # type: ignore
                     if not chunks.exists():
                         self.stdout.write(
-                            self.style.WARNING(f'No chunks found for {document.filename}')
+                            self.style.WARNING(f'No chunks found for {document.filename}')  # type: ignore
                         )
                         continue
                     
                     # Combine chunks into full text
                     full_text = ' '.join([chunk.text for chunk in chunks])
                     
-                    # Generate summary
-                    summary = gemini_service.generate_summary(full_text, document.title or document.filename)
+                    # Generate summary with increased length
+                    summary = gemini_service.generate_summary(full_text, document.title or document.filename, max_length=1000)
                     
                     if summary:
                         # Update document with summary
@@ -106,11 +102,11 @@ class Command(BaseCommand):
                         
                         processed_count += 1
                         self.stdout.write(
-                            self.style.SUCCESS(f'Successfully generated summary for {document.filename}')
+                            self.style.SUCCESS(f'Successfully generated summary for {document.filename}')  # type: ignore
                         )
                     else:
                         self.stdout.write(
-                            self.style.WARNING(f'Failed to generate summary for {document.filename}')
+                            self.style.WARNING(f'Failed to generate summary for {document.filename}')  # type: ignore
                         )
                         error_count += 1
                     
@@ -118,13 +114,13 @@ class Command(BaseCommand):
                     error_count += 1
                     logger.error(f'Error generating summary for {document.filename}: {str(e)}')
                     self.stdout.write(
-                        self.style.ERROR(f'Error generating summary for {document.filename}: {str(e)}')
+                        self.style.ERROR(f'Error generating summary for {document.filename}: {str(e)}')  # type: ignore
                     )
             
             # Summary
             self.stdout.write('\n' + '='*50)
             self.stdout.write(
-                self.style.SUCCESS('Summary Generation Complete!')
+                self.style.SUCCESS('Summary Generation Complete!')  # type: ignore
             )
             self.stdout.write(f'Processed: {processed_count}')
             self.stdout.write(f'Skipped: {skipped_count}')
@@ -133,6 +129,6 @@ class Command(BaseCommand):
         except Exception as e:
             logger.error(f'Fatal error during summary generation: {str(e)}')
             self.stdout.write(
-                self.style.ERROR(f'Fatal error: {str(e)}')
+                self.style.ERROR(f'Fatal error: {str(e)}')  # type: ignore
             )
             raise

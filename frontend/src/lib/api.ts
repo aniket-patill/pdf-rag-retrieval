@@ -30,6 +30,9 @@ export interface QueryResponse {
     score: number;
     text_preview: string;
     page?: number;
+    semantic_score?: number;
+    keyword_score?: number;
+    tfidf_score?: number;
   }>;
   query: string;
 }
@@ -75,6 +78,9 @@ export interface ChatMessage {
     score: number;
     text_preview: string;
     page?: number;
+    semantic_score?: number;
+    keyword_score?: number;
+    tfidf_score?: number;
   }>;
   document_ids: string[];
   created_at: string;
@@ -88,9 +94,6 @@ export class ApiService {
     
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
-      console.log('API headers with auth:', { ...headers, Authorization: 'Bearer [REDACTED]' });
-    } else {
-      console.log('API headers without auth:', headers);
     }
     
     return headers;
@@ -113,7 +116,6 @@ export class ApiService {
   }
 
   async searchDocuments(query: string, limit = 10, token?: string): Promise<SearchResponse> {
-    console.log('searchDocuments called with token:', !!token);
     const response = await fetch(`${API_BASE_URL}/search/`, {
       method: 'POST',
       headers: this.getHeaders(token),
@@ -139,18 +141,14 @@ export class ApiService {
   }
 
   async getFavorites(token?: string): Promise<Favorite[]> {
-    console.log('getFavorites called with token:', !!token);
     const response = await fetch(`${API_BASE_URL}/favorites/`, {
       headers: this.getHeaders(token)
     });
-    console.log('getFavorites response status:', response.status);
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('getFavorites error:', response.status, errorText);
       throw new Error(`Failed to fetch favorites: ${response.statusText} - ${errorText}`);
     }
     const data = await response.json();
-    console.log('getFavorites data:', data);
     return data;
   }
 
@@ -162,7 +160,6 @@ export class ApiService {
     });
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('addFavorite error:', response.status, errorText);
       throw new Error(`Failed to add favorite: ${response.statusText} - ${errorText}`);
     }
     return response.json();
@@ -175,7 +172,6 @@ export class ApiService {
     });
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('removeFavorite error:', response.status, errorText);
       throw new Error(`Failed to remove favorite: ${response.statusText} - ${errorText}`);
     }
   }
@@ -195,18 +191,14 @@ export class ApiService {
   }
 
   async getSearchHistory(token?: string): Promise<SearchHistoryItem[]> {
-    console.log('getSearchHistory called with token:', !!token, token ? `Token length: ${token.length}` : 'No token');
     const response = await fetch(`${API_BASE_URL}/history/`, {
       headers: this.getHeaders(token)
     });
-    console.log('getSearchHistory response status:', response.status);
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('getSearchHistory error:', response.status, errorText);
       throw new Error(`Failed to fetch search history: ${response.statusText} - ${errorText}`);
     }
     const data = await response.json();
-    console.log('getSearchHistory data:', data);
     return data;
   }
 
@@ -227,12 +219,9 @@ export class ApiService {
     });
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('deleteSearchHistoryItem error:', response.status, errorText);
       throw new Error(`Failed to delete search history item: ${response.statusText} - ${errorText}`);
     }
   }
-
-  // Chat API
   async createConversation(token?: string): Promise<{ conversation_id: string }> {
     const response = await fetch(`${API_BASE_URL}/chat/conversations/`, {
       method: 'POST',
@@ -289,6 +278,54 @@ export class ApiService {
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(`Failed to delete conversation: ${response.statusText} - ${errorText}`);
+    }
+  }
+
+  async uploadPdf(file: File, token?: string): Promise<{ message: string; document: Document }> {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    // For file uploads, we need to let the browser set the Content-Type header
+    // with the correct boundary, so we don't set it explicitly
+    const headers: Record<string, string> = {};
+    
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`${API_BASE_URL}/docs/upload/`, {
+      method: 'POST',
+      headers: headers,
+      body: formData
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      const errorMessage = errorData.error || `Failed to upload PDF: ${response.statusText}`;
+      throw new Error(errorMessage);
+    }
+
+    return response.json();
+  }
+
+  async getUserDocuments(token?: string): Promise<Document[]> {
+    const response = await fetch(`${API_BASE_URL}/docs/user/`, {
+      headers: this.getHeaders(token)
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch user documents: ${response.statusText}`);
+    }
+    return response.json();
+  }
+
+  async deleteDocument(documentId: string, token?: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/docs/${documentId}/delete/`, {
+      method: 'DELETE',
+      headers: this.getHeaders(token)
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to delete document: ${response.statusText} - ${errorText}`);
     }
   }
 }

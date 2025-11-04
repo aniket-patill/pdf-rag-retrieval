@@ -25,8 +25,6 @@ export default function Home() {
   const [modalDocId, setModalDocId] = useState<string>("");
   const [modalDocTitle, setModalDocTitle] = useState<string>("");
   const [modalInitialPage, setModalInitialPage] = useState<number | undefined>(undefined);
-
-  // Load documents and favorites on component mount
   useEffect(() => {
     loadDocuments();
     loadFavorites();
@@ -53,7 +51,7 @@ export default function Home() {
   const loadFavorites = async () => {
     try {
       const token = await getToken();
-      const favorites = await apiService.getFavorites(token || undefined);
+      const favorites = await apiService.getFavorites(token);
       const favoriteIds = new Set(favorites.map(fav => fav.document.id));
       setDocuments(prev => prev.map(doc => ({ ...doc, isFavorite: favoriteIds.has(doc.id) })));
       setSearchResults(prev => prev.map(doc => ({ ...doc, isFavorite: favoriteIds.has(doc.id) })));
@@ -145,7 +143,7 @@ export default function Home() {
                       <div className="mt-3">
                         <span className="text-xs text-muted-foreground mr-2">Citations:</span>
                         <div className="flex flex-wrap gap-2">
-                          {m.sources.map((_, sIdx) => (
+                          {m.sources.slice(0, 5).map((_, sIdx) => (
                             <Button key={sIdx} size="sm" variant="outline" onClick={() => openCitationModal(sIdx)}>
                               [{sIdx + 1}]
                             </Button>
@@ -190,7 +188,7 @@ export default function Home() {
         {/* Sources from last assistant message */}
         {(() => {
           const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant' && m.sources && m.sources.length > 0);
-          const sources = lastAssistant?.sources || [];
+          const sources = (lastAssistant?.sources || []).slice(0, 5);
           return sources.length > 0 ? (
             <div className="mb-12 max-w-4xl mx-auto">
               <h2 className="text-2xl font-semibold mb-6">Sources</h2>
@@ -201,8 +199,17 @@ export default function Home() {
                       <div className="flex-1">
                         <div className="text-sm text-muted-foreground mb-1">Source [{idx + 1}]</div>
                         <p className="text-sm leading-relaxed">{src.text_preview}</p>
-                        <div className="mt-2 text-xs text-muted-foreground">Similarity: {(src.score * 100).toFixed(1)}%{src.page ? ` • Page ${src.page}` : ''}</div>
+                        <div className="mt-2 text-xs text-muted-foreground">
+                          Final Score: {((((src.semantic_score ?? src.score ?? 0) * 0.6) + ((src.tfidf_score ?? 0) * 0.3) + ((src.keyword_score ?? 0) * 0.1)) * 100).toFixed(1)}%
+                          {src.page ? ` • Page ${src.page}` : ''}
+                        </div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {src.semantic_score !== undefined && <span>Cosine: {(src.semantic_score * 100).toFixed(1)}%</span>}
+                          {src.keyword_score !== undefined && <> • Keyword: {(src.keyword_score * 100).toFixed(1)}%</>}
+                          {src.tfidf_score !== undefined && <> • TF-IDF: {(src.tfidf_score * 100).toFixed(1)}%</>}
+                        </div>
                       </div>
+                      
                       <div className="flex flex-col gap-2">
                         <Button variant="outline" size="sm" onClick={() => window.location.assign(`/document/${src.document_id}`)}>Open in Document Page</Button>
                         <Button variant="outline" size="sm" onClick={() => openCitationModal(idx)}>Open Preview</Button>

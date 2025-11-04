@@ -1,27 +1,24 @@
-"""
-Service for ChromaDB operations.
-"""
 import os
 import chromadb
 from chromadb.config import Settings
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Any
 import logging
+import re
+import math
 
 logger = logging.getLogger(__name__)
 
 
 class ChromaDBService:
-    """Service for ChromaDB vector database operations."""
     
     def __init__(self, chromadb_path: str, collection_name: str = "documents"):
         self.chromadb_path = chromadb_path
         self.collection_name = collection_name
-        self.client = None
-        self.collection = None
+        self.client: Any = None
+        self.collection: Any = None
         self._initialize_client()
     
     def _initialize_client(self):
-        """Initialize ChromaDB client and collection."""
         try:
             # Create directory if it doesn't exist
             os.makedirs(self.chromadb_path, exist_ok=True)
@@ -48,16 +45,6 @@ class ChromaDBService:
             raise
     
     def add_document_chunks(self, document_id: str, chunks: List[Dict]) -> bool:
-        """
-        Add document chunks to ChromaDB.
-        
-        Args:
-            document_id: ID of the document
-            chunks: List of chunk dictionaries with text and metadata
-            
-        Returns:
-            True if successful, False otherwise
-        """
         try:
             if not chunks:
                 logger.warning(f"No chunks to add for document {document_id}")
@@ -95,17 +82,6 @@ class ChromaDBService:
     
     def search_similar_chunks(self, query: str, n_results: int = 10, 
                             document_ids: Optional[List[str]] = None) -> List[Dict]:
-        """
-        Search for similar chunks using vector similarity.
-        
-        Args:
-            query: Search query
-            n_results: Number of results to return
-            document_ids: Optional list of document IDs to filter by
-            
-        Returns:
-            List of similar chunks with metadata
-        """
         try:
             # Prepare where clause for filtering
             where_clause = None
@@ -130,7 +106,7 @@ class ChromaDBService:
                     similar_chunks.append({
                         'text': doc,
                         'metadata': metadata,
-                        'score': 1 - distance,  # Convert distance to similarity score
+                        'score': 1 - distance,
                         'rank': i + 1
                     })
             
@@ -142,15 +118,6 @@ class ChromaDBService:
             return []
     
     def delete_document_chunks(self, document_id: str) -> bool:
-        """
-        Delete all chunks for a specific document.
-        
-        Args:
-            document_id: ID of the document to delete
-            
-        Returns:
-            True if successful, False otherwise
-        """
         try:
             # Find all chunks for this document
             results = self.collection.get(
@@ -168,7 +135,6 @@ class ChromaDBService:
             return False
     
     def get_collection_stats(self) -> Dict:
-        """Get statistics about the collection."""
         try:
             count = self.collection.count()
             return {
@@ -178,3 +144,123 @@ class ChromaDBService:
         except Exception as e:
             logger.error(f"Error getting collection stats: {str(e)}")
             return {'total_chunks': 0, 'collection_name': self.collection_name}
+    
+    def hybrid_search(self, query: str, n_results: int = 10, top_k: int = 50, epsilon: float = 0.02, include_tfidf: bool = True, document_ids: Optional[List[str]] = None, unique_citations: bool = True) -> List[Dict]:
+        try:
+            where_clause = None
+            if document_ids:
+                where_clause = {"document_id": {"$in": document_ids}}
+
+            results = self.collection.query(query_texts=[query], n_results=top_k, where=where_clause)
+            if not results.get('documents') or not results['documents'][0]:
+                logger.info("No candidates found for query")
+                return []
+
+            docs = results['documents'][0]
+            metas = results['metadatas'][0]
+            dists = results['distances'][0]
+
+            semantic_scores = [1 - d for d in dists]
+            semantic_scores = self._normalize_scores(semantic_scores)
+
+            keyword_scores = [self._keyword_overlap_score(query, d) for d in docs]
+            keyword_scores = self._normalize_scores(keyword_scores)
+
+            tfidf_scores = [0.0] * len(docs)
+            if include_tfidf:
+                tfidf_scores = self._compute_tfidf_scores(query, docs)
+                tfidf_scores = self._normalize_scores(tfidf_scores)
+
+            candidates = []
+            for i, (doc, meta) in enumerate(zip(docs, metas)):
+                candidates.append({
+                    'text': doc,
+                    'metadata': meta,
+                    'semantic_score': semantic_scores[i],
+                    'keyword_score': keyword_scores[i],
+                    'tfidf_score': tfidf_scores[i],
+                    'score': semantic_scores[i]
+                })
+
+            candidates.sort(key=lambda x: x['semantic_score'], reverse=True)
+
+            if candidates:
+                group_start = 0
+                for i in range(1, len(candidates)):
+                    if candidates[group_start]['semantic_score'] - candidates[i]['semantic_score'] > epsilon:
+                        slice_sorted = sorted(candidates[group_start:i], key=lambda x: x['keyword_score'], reverse=True)
+                        candidates[group_start:i] = slice_sorted
+                        group_start = i
+                slice_sorted = sorted(candidates[group_start:], key=lambda x: x['keyword_score'], reverse=True)
+                candidates[group_start:] = slice_sorted
+
+            final = []
+            seen_docs = set()
+            for c in candidates:
+                doc_id = c['metadata'].get('document_id')
+                if unique_citations and doc_id in seen_docs:
+                    continue
+                final.append(c)
+                if unique_citations and doc_id:
+                    seen_docs.add(doc_id)
+                if len(final) >= n_results:
+                    break
+
+            for idx, item in enumerate(final, start=1):
+                item['rank'] = idx
+
+            logger.info(f"Hybrid search produced {len(final)} results")
+            return final
+        except Exception as e:
+            logger.error(f"Error in hybrid_search: {str(e)}")
+            return []
+    
+    def _normalize_scores(self, scores: List[float]) -> List[float]:
+        if not scores:
+            return []
+        mn = min(scores)
+        mx = max(scores)
+        if mx - mn <= 1e-12:
+            return [0.0 for _ in scores]
+        return [(s - mn) / (mx - mn) for s in scores]
+    
+    def _tokenize(self, text: str) -> List[str]:
+        tokens = re.findall(r'\b\w+\b', text.lower())
+        return tokens
+    
+    def _keyword_overlap_score(self, query: str, doc: str) -> float:
+        q_terms = set(self._tokenize(query))
+        if not q_terms:
+            return 0.0
+        d_terms = set(self._tokenize(doc))
+        overlap = len(q_terms & d_terms)
+        return overlap / len(q_terms)
+    
+    def _compute_tfidf_scores(self, query: str, docs: List[str]) -> List[float]:
+        q_terms = set(self._tokenize(query))
+        if not q_terms or not docs:
+            return [0.0] * len(docs)
+        doc_tokens = [self._tokenize(d) for d in docs]
+        N = len(doc_tokens)
+        df = {}
+        for terms in doc_tokens:
+            seen = set(terms)
+            for t in seen:
+                df[t] = df.get(t, 0) + 1
+        idf = {t: math.log((N + 1) / (df.get(t, 0) + 1)) + 1.0 for t in q_terms}
+        scores = []
+        for terms in doc_tokens:
+            if not terms:
+                scores.append(0.0)
+                continue
+            tf = {}
+            for t in terms:
+                tf[t] = tf.get(t, 0) + 1
+            for t in tf:
+                tf[t] = tf[t] / len(terms)
+            s = 0.0
+            for t in q_terms:
+                if t in tf:
+                    s += tf[t] * idf.get(t, 1.0)
+            scores.append(s)
+        return scores

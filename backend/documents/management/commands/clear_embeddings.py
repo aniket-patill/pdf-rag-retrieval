@@ -1,6 +1,3 @@
-"""
-Management command to clear all embeddings and documents.
-"""
 import logging
 from django.core.management.base import BaseCommand
 from django.conf import settings
@@ -21,7 +18,6 @@ class Command(BaseCommand):
         )
     
     def handle(self, *args, **options):
-        """Handle the command execution."""
         if not options['confirm']:
             self.stdout.write(
                 self.style.WARNING(

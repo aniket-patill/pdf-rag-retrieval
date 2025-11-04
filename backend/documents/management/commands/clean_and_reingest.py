@@ -1,7 +1,3 @@
-"""
-Management command to clean the database and reingest all PDFs.
-This will remove all documents, chunks, and ChromaDB data, then reingest all PDFs from the pdfs directory.
-"""
 import os
 import shutil
 from pathlib import Path
@@ -64,7 +60,6 @@ class Command(BaseCommand):
         print('✅ Database cleanup and re-ingestion completed successfully!')
 
     def clean_database(self, keep_history=False):
-        """Clean all document-related data from the database."""
         print('🧹 Cleaning database...')
 
         # Delete in the correct order to avoid foreign key constraints
@@ -92,7 +87,6 @@ class Command(BaseCommand):
             print('  Kept search and query history as requested')
 
     def clean_chromadb(self):
-        """Clean the ChromaDB collection."""
         print('🗃️ Cleaning ChromaDB...')
         
         try:
@@ -114,7 +108,6 @@ class Command(BaseCommand):
             print(f'⚠️ ChromaDB cleanup warning: {str(e)}')
 
     def reingest_pdfs(self, generate_summaries=False, summary_length=1500):
-        """Reingest all PDFs from the pdfs directory."""
         print('📄 Re-ingesting PDFs...')
 
         # Initialize services
@@ -204,7 +197,6 @@ class Command(BaseCommand):
             self.generate_summaries(summary_length)
     
     def generate_summaries(self, max_length=1500):
-        """Generate large summaries for all documents."""
         print('🦾 Generating large summaries...')
         
         try:

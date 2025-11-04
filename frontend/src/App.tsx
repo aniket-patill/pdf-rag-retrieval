@@ -13,15 +13,15 @@ import History from "./pages/History";
 import Landing from "./pages/Landing";
 import SignIn from "./pages/SignIn";
 import SignUp from "./pages/SignUp";
+import UploadPDF from "./pages/UploadPDF.tsx";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
-// Get Clerk publishable key from environment
 const CLERK_PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
 if (!CLERK_PUBLISHABLE_KEY) {
-  console.error("Missing Clerk Publishable Key. Please add VITE_CLERK_PUBLISHABLE_KEY to your .env file.");
+  console.error("Missing VITE_CLERK_PUBLISHABLE_KEY in environment");
 }
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -58,7 +58,7 @@ const App = () => (
                   </>
                 }
               />
-              
+
               {/* Public routes */}
               <Route path="/sign-in/*" element={<SignIn />} />
               <Route path="/sign-up/*" element={<SignUp />} />
@@ -69,6 +69,14 @@ const App = () => (
                 element={
                   <ProtectedRoute>
                     <Home />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/upload"
+                element={
+                  <ProtectedRoute>
+                    <UploadPDF />
                   </ProtectedRoute>
                 }
               />

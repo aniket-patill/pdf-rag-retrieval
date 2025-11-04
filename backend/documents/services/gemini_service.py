@@ -1,6 +1,6 @@
-"""
-Service for Google Gemini AI operations.
-"""
+from google.generativeai.generative_models import GenerativeModel
+
+
 import os
 import google.generativeai as genai
 from typing import List, Dict, Optional
@@ -10,7 +10,6 @@ logger = logging.getLogger(__name__)
 
 
 class GeminiService:
-    """Service for Google Gemini AI operations."""
     
     def __init__(self, api_key: str):
         self.api_key = api_key
@@ -19,27 +18,18 @@ class GeminiService:
         
         # Configure Gemini
         genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel('gemini-2.5-flash')
+        self.model: GenerativeModel = genai.GenerativeModel('gemini-2.5-flash')
     
-    def generate_summary(self, text: str, title: str = "", max_length: int = 500) -> str:
-        """
-        Generate a summary of the provided text.
-        
-        Args:
-            text: The text to summarize
-            max_length: Maximum length of the summary
-            
-        Returns:
-            Generated summary
-        """
+    def generate_summary(self, text: str, title: str = "", max_length: int = 1000) -> str:
         try:
             title_context = f"Document: {title}\n\n" if title else ""
             prompt = f"""
             Please provide a concise summary of the following text. 
             The summary should be no more than {max_length} characters and capture the main points.
+            Focus on the key topics, findings, and conclusions in the document.
             
             {title_context}Text:
-            {text[:4000]}  # Limit input to avoid token limits
+            {text[:8000]}
             """
             
             response = self.model.generate_content(prompt)
@@ -57,16 +47,6 @@ class GeminiService:
             return "Unable to generate summary at this time."
     
     def answer_question(self, question: str, context_chunks: List[Dict]) -> str:
-        """
-        Answer a question based on provided context chunks.
-        
-        Args:
-            question: The user's question
-            context_chunks: List of relevant text chunks for context
-            
-        Returns:
-            AI-generated answer
-        """
         try:
             # Prepare context from chunks
             context_text = "\n\n".join([
@@ -75,12 +55,12 @@ class GeminiService:
             ])
             
             prompt = f"""
-            Based on the following context from documents, please answer the user's question.
-            If the answer cannot be found in the provided context, please say so clearly.
-            Provide a helpful and accurate response based only on the given information.
+            You are a helpful assistant that answers questions based on provided document context.
+            Use ONLY the information from the context below to answer the question.
+            If the answer cannot be found in the provided context, say "I cannot find relevant information in the provided documents."
             
             Context:
-            {context_text[:6000]}  # Limit context to avoid token limits
+            {context_text[:6000]}
             
             Question: {question}
             
@@ -98,20 +78,10 @@ class GeminiService:
             return "I'm sorry, I encountered an error while processing your question. Please try again."
     
     def search_and_answer(self, query: str, context_chunks: List[Dict]) -> Dict:
-        """
-        Search for relevant information and provide an answer.
-        
-        Args:
-            query: The search query
-            context_chunks: List of relevant text chunks
-            
-        Returns:
-            Dictionary with answer and sources
-        """
         try:
             # Prepare context
             context_text = "\n\n".join([
-                f"Source {i+1} (Document {chunk['metadata']['document_id']}):\n{chunk['text']}"
+                f"Source {i+1} (Document ID: {chunk['metadata']['document_id']}, Chunk: {chunk['metadata']['chunk_index']}):\n{chunk['text']}"
                 for i, chunk in enumerate(context_chunks)
             ])
             
@@ -119,7 +89,7 @@ class GeminiService:
             Based on the following search results, please provide a comprehensive answer to the user's query.
             Include relevant information from the sources and cite which sources you're using.
             
-            Search Results:
+            Sources:
             {context_text[:6000]}
             
             Query: {query}
@@ -142,7 +112,10 @@ class GeminiService:
                     'document_id': chunk['metadata']['document_id'],
                     'chunk_index': chunk['metadata']['chunk_index'],
                     'score': chunk.get('score', 0),
-                    'text_preview': chunk['text'][:200] + "..." if len(chunk['text']) > 200 else chunk['text']
+                    'text_preview': chunk['text'][:200] + "..." if len(chunk['text']) > 200 else chunk['text'],
+                    'semantic_score': chunk.get('semantic_score'),
+                    'keyword_score': chunk.get('keyword_score'),
+                    'tfidf_score': chunk.get('tfidf_score')
                 })
             
             return {

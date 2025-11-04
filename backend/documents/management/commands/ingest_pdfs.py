@@ -1,6 +1,3 @@
-"""
-Management command to ingest PDFs and generate embeddings.
-"""
 import os
 import logging
 from django.core.management.base import BaseCommand
@@ -30,7 +27,6 @@ class Command(BaseCommand):
         )
     
     def handle(self, *args, **options):
-        """Handle the command execution."""
         force = options['force']
         pdfs_path = options.get('pdfs_path') or settings.PDFS_PATH
         

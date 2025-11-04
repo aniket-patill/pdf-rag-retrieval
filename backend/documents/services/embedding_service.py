@@ -1,30 +1,17 @@
-"""
-Service for text chunking and embedding generation.
-"""
 import re
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Any
 import logging
 
 logger = logging.getLogger(__name__)
 
 
 class EmbeddingService:
-    """Service for text chunking and embedding operations."""
     
     def __init__(self, chunk_size: int = 1000, chunk_overlap: int = 200):
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
     
-    def split_text_into_chunks(self, text: str) -> List[Dict[str, any]]:
-        """
-        Split text into overlapping chunks for embedding.
-        
-        Args:
-            text: The text to split
-            
-        Returns:
-            List of chunk dictionaries with text and metadata
-        """
+    def split_text_into_chunks(self, text: str) -> List[Dict[str, Any]]:
         if not text.strip():
             return []
         
@@ -44,7 +31,7 @@ class EmbeddingService:
                 chunks.append({
                     'text': current_chunk.strip(),
                     'chunk_index': chunk_index,
-                    'start_char': 0,  # Will be calculated properly in production
+                    'start_char': 0,
                     'end_char': len(current_chunk)
                 })
                 chunk_index += 1
@@ -68,7 +55,6 @@ class EmbeddingService:
         return chunks
     
     def _clean_text(self, text: str) -> str:
-        """Clean and normalize text."""
         # Remove excessive whitespace
         text = re.sub(r'\s+', ' ', text)
         # Remove special characters but keep punctuation
@@ -76,13 +62,10 @@ class EmbeddingService:
         return text.strip()
     
     def _split_into_sentences(self, text: str) -> List[str]:
-        """Split text into sentences."""
-        # Simple sentence splitting - can be improved with NLP libraries
         sentences = re.split(r'[.!?]+', text)
         return [s.strip() for s in sentences if s.strip()]
     
     def _get_overlap_text(self, text: str) -> str:
-        """Get the last part of text for overlap."""
         if len(text) <= self.chunk_overlap:
             return text
         
@@ -99,5 +82,4 @@ class EmbeddingService:
         return overlap_text.strip()
     
     def create_chunk_embedding_id(self, document_id: str, chunk_index: int) -> str:
-        """Create a unique embedding ID for a chunk."""
         return f"{document_id}_chunk_{chunk_index}"
