@@ -1,3 +1,4 @@
 # Root ignore file
 # Ignore environment files
 .env
+chroma_db/# In chromadb_service.py

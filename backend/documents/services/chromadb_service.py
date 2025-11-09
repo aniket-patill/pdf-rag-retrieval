@@ -7,6 +7,7 @@ import re
 import math
 
 logger = logging.getLogger(__name__)
+os.makedirs("chroma_db", exist_ok=True)
 
 
 class ChromaDBService:
