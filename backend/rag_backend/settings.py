@@ -5,6 +5,7 @@ Django settings for rag_backend project.
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+import dj_database_url
 
 # Load environment variables
 load_dotenv()
@@ -16,9 +17,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-change-this-in-production')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
+DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
 
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+# Allow all hosts in Railway
+ALLOWED_HOSTS = ['*']
 
 # Application definition
 INSTALLED_APPS = [
@@ -67,12 +69,25 @@ TEMPLATES = [
 WSGI_APPLICATION = 'rag_backend.wsgi.application'
 
 # Database
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+# Use PostgreSQL in production (Railway), SQLite in development
+database_url = os.getenv('DATABASE_URL')
+if database_url:
+    # Railway PostgreSQL
+    DATABASES = {
+        'default': dj_database_url.parse(
+            database_url,
+            conn_max_age=600,
+            conn_health_checks=True,
+        )
     }
-}
+else:
+    # Local SQLite
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
@@ -116,16 +131,14 @@ REST_FRAMEWORK = {
     'PAGE_SIZE': 20,
 }
 
-# CORS settings
+# Update CORS settings for production
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://localhost:8080",
-    "http://127.0.0.1:8080",
-    "http://localhost:8081",
-    "http://127.0.0.1:8081",
+    "https://your-frontend-domain.up.railway.app",  # Will update after deployment
 ]
 
 CORS_ALLOW_CREDENTIALS = True
