@@ -138,13 +138,16 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://localhost:8080",
-    "https://your-frontend-domain.up.railway.app",  # Will update after deployment
+    "https://pdf-rag-retrieval-app.up.railway.app",
 ]
 
+# Allow credentials if needed for authentication
 CORS_ALLOW_CREDENTIALS = True
 
 # Additional CORS settings for better compatibility
 CORS_ALLOW_ALL_ORIGINS = False  # Keep this False for security
+
+# Ensure all necessary headers are allowed
 CORS_ALLOW_HEADERS = [
     'accept',
     'accept-encoding',
@@ -156,6 +159,35 @@ CORS_ALLOW_HEADERS = [
     'x-csrftoken',
     'x-requested-with',
 ]
+
+# Allow necessary HTTP methods
+CORS_ALLOW_METHODS = [
+    'DELETE',
+    'GET',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
+]
+
+# Pre-flight cache timeout
+CORS_PREFLIGHT_MAX_AGE = 86400
+
+# Expose headers to the browser
+CORS_EXPOSE_HEADERS = [
+    'Content-Disposition',
+]
+
+# Security settings for production
+if not DEBUG:
+    SECURE_SSL_REDIRECT = True
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_BROWSER_XSS_FILTER = True
+    X_FRAME_OPTIONS = 'DENY'
 
 # Environment variables
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
