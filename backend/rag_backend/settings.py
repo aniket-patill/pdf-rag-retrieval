@@ -19,8 +19,13 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-change-this-in-production'
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
 
-# Allow all hosts in Railway
-ALLOWED_HOSTS = ['*']
+# Ensure the allowed hosts include your Railway domain
+ALLOWED_HOSTS = [
+    'localhost',
+    '127.0.0.1',
+    'pdf-rag-retrieval-production.up.railway.app',
+    '.up.railway.app',  # This allows all Railway subdomains
+]
 
 # Application definition
 INSTALLED_APPS = [
