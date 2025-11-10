@@ -6,17 +6,12 @@ import { componentTagger } from "lovable-tagger";
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
   server: {
-    host: "::",
+    host: true,
     port: 8080,
-    strictPort: true,
   },
   preview: {
-    host: "::",
+    host: true,
     port: 8080,
-    strictPort: true,
-    allowedHosts: [
-      "pdf-rag-retrieval-app.up.railway.app"
-    ]
   },
   plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
   resolve: {
