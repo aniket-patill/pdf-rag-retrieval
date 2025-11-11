@@ -749,15 +749,23 @@ def delete_document(request, document_id):
             return Response({'error': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
         
         # Delete associated chunks from database
-        DocumentChunk.objects.filter(document=document).delete()  # type: ignore
+        DocumentChunk.objects.filter(document=document).delete()
         
         # Delete chunks from ChromaDB
-        chromadb_service = ChromaDBService(settings.CHROMADB_PATH)
-        chromadb_service.delete_document_chunks(document_id)
+        try:
+            chromadb_service = ChromaDBService(settings.CHROMADB_PATH)
+            chromadb_service.delete_document_chunks(document_id)
+        except Exception as e:
+            logger.error(f"Error deleting document chunks from ChromaDB: {str(e)}")
+            # Continue with deletion even if ChromaDB fails
         
         # Delete file from filesystem
-        if os.path.exists(document.file_path):
-            os.remove(document.file_path)
+        try:
+            if os.path.exists(document.file_path):
+                os.remove(document.file_path)
+        except Exception as e:
+            logger.error(f"Error deleting document file: {str(e)}")
+            # Continue with deletion even if file deletion fails
         
         # Delete document record
         document.delete()
