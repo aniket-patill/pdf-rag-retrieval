@@ -75,34 +75,16 @@ WSGI_APPLICATION = 'rag_backend.wsgi.application'
 
 # Database
 # Use PostgreSQL in production (Railway), SQLite in development
-import dj_database_url
-
 database_url = os.getenv('DATABASE_URL')
 if database_url:
     # Railway PostgreSQL
-    try:
-        DATABASES = {
-            'default': dj_database_url.parse(
-                database_url,
-                conn_max_age=600,
-                conn_health_checks=True,
-                ssl_require=True,  # Ensure SSL connection
-            )
-        }
-        # Add connection options for better reliability
-        DATABASES['default']['OPTIONS'] = {
-            'charset': 'utf8mb4',
-            'use_unicode': True,
-        }
-    except Exception as e:
-        print(f"Error configuring PostgreSQL: {e}")
-        # Fallback to SQLite if PostgreSQL fails
-        DATABASES = {
-            'default': {
-                'ENGINE': 'django.db.backends.sqlite3',
-                'NAME': BASE_DIR / 'db.sqlite3',
-            }
-        }
+    DATABASES = {
+        'default': dj_database_url.parse(
+            database_url,
+            conn_max_age=600,
+            conn_health_checks=True,
+        )
+    }
 else:
     # Local SQLite
     DATABASES = {
@@ -160,14 +142,8 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:3000",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-<<<<<<< HEAD
-    "http://localhost:8080", 
-    "https://pdf-rag-retrieval.vercel.app",  # Vercel frontend (no trailing slash)
-=======
     "http://localhost:8080",
     "https://pdf-rag-retrieval.vercel.app",
-    "https://pdf-rag-retrieval-app.up.railway.app",
->>>>>>> 1b0442272081c826f998aacd6b7aad970483324e
 ]
 
 # Allow credentials if needed for authentication
