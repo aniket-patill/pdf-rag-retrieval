@@ -160,8 +160,14 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:3000",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+<<<<<<< HEAD
     "http://localhost:8080", 
     "https://pdf-rag-retrieval.vercel.app",  # Vercel frontend (no trailing slash)
+=======
+    "http://localhost:8080",
+    "https://pdf-rag-retrieval.vercel.app",
+    "https://pdf-rag-retrieval-app.up.railway.app",
+>>>>>>> 1b0442272081c826f998aacd6b7aad970483324e
 ]
 
 # Allow credentials if needed for authentication
