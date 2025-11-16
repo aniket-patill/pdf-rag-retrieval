@@ -621,8 +621,6 @@ def upload_pdf(request):
         
         # Process the PDF using existing ingestion logic
         pdf_service = PDFService(settings.PDFS_PATH)
-        embedding_service = EmbeddingService()
-        chromadb_service = ChromaDBService(settings.CHROMADB_PATH)
         
         # Generate document ID from file hash
         document_id = pdf_service.get_file_hash(Path(file_path))
@@ -656,64 +654,45 @@ def upload_pdf(request):
             clerk_user_id=clerk_user_id,
         )
         
-        # Split text into chunks
-        chunks = embedding_service.split_text_into_chunks(text)
-        
-        if not chunks:
-            # Clean up if no chunks created
-            document.delete()
-            os.remove(file_path)
-            return Response(
-                {'error': 'Could not process this PDF into searchable chunks'}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # Save chunks to database
-        chunk_objects = []
-        for chunk in chunks:
-            chunk_obj = DocumentChunk.objects.create(  # type: ignore
-                document=document,
-                chunk_index=chunk['chunk_index'],
-                text=chunk['text'],
-                embedding_id=embedding_service.create_chunk_embedding_id(
-                    document_id, chunk['chunk_index']
-                )
-            )
-            chunk_objects.append(chunk_obj)
-        
-        # Add chunks to ChromaDB
-        chromadb_service.add_document_chunks(document_id, chunks)
-        
-        # Return success response immediately without waiting for summary
+        # Return success response immediately without waiting for any processing
         serializer = DocumentSerializer(document)
         response_data = {
-            'message': 'PDF uploaded and processed successfully',
+            'message': 'PDF uploaded successfully. Processing will continue in the background.',
             'document': serializer.data
         }
         
-        # Trigger async summary generation
+        # Trigger async document processing (chunking, embedding, and summary)
         try:
             import threading
             from django.core.management import call_command
             
-            def generate_summary_async():
+            def process_document_async():
                 try:
+                    logger.info(f"Starting async processing for document {document_id}")
                     # Run the management command in a separate thread
-                    call_command('generate_summaries', document_id=document_id)
-                    logger.info(f"Completed async summary generation for document {document_id}")
+                    call_command('ingest_pdfs', '--document-id', document_id)
+                    logger.info(f"Completed async processing for document {document_id}")
+                    
+                    # Also generate summary
+                    try:
+                        call_command('generate_summaries', '--document-id', document_id)
+                        logger.info(f"Completed async summary generation for document {document_id}")
+                    except Exception as e:
+                        logger.error(f"Error in async summary generation for document {document_id}: {str(e)}")
+                        
                 except Exception as e:
-                    logger.error(f"Error in async summary generation for document {document_id}: {str(e)}")
+                    logger.error(f"Error in async document processing for document {document_id}: {str(e)}")
             
-            # Start summary generation in background thread
-            summary_thread = threading.Thread(target=generate_summary_async)
-            summary_thread.daemon = True
-            summary_thread.start()
+            # Start processing in background thread
+            processing_thread = threading.Thread(target=process_document_async)
+            processing_thread.daemon = True
+            processing_thread.start()
             
-            logger.info(f"Started async summary generation thread for document {document_id}")
+            logger.info(f"Started async document processing thread for document {document_id}")
             
         except Exception as e:
-            logger.error(f"Error starting async summary generation for document {document_id}: {str(e)}")
-            # Don't fail the upload if summary generation fails to start
+            logger.error(f"Error starting async document processing for document {document_id}: {str(e)}")
+            # Don't fail the upload if processing fails to start
         
         return Response(response_data, status=status.HTTP_201_CREATED)
         
@@ -723,7 +702,6 @@ def upload_pdf(request):
             {'error': 'Failed to upload PDF'}, 
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
-
 
 @api_view(['GET'])
 def list_user_documents(request):
