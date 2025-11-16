@@ -33,13 +33,29 @@ export default function Home() {
   const loadDocuments = async () => {
     try {
       setLoading(true);
-      const data = await apiService.getDocuments();
-      const formattedDocs = data.results.map((apiDoc: ApiDocument) => ({
-        id: apiDoc.id,
-        title: apiDoc.title || apiDoc.filename,
-        summary: apiDoc.summary || "No summary available",
-        isFavorite: false,
-      }));
+      const token = await getToken();
+      let formattedDocs;
+      
+      if (token) {
+        // If user is authenticated, fetch only their documents
+        const userDocs = await apiService.getUserDocuments(token);
+        formattedDocs = userDocs.map((apiDoc: ApiDocument) => ({
+          id: apiDoc.id,
+          title: apiDoc.title || apiDoc.filename,
+          summary: apiDoc.summary || "No summary available",
+          isFavorite: false,
+        }));
+      } else {
+        // If no user is authenticated, fetch all public documents
+        const data = await apiService.getDocuments();
+        formattedDocs = data.results.map((apiDoc: ApiDocument) => ({
+          id: apiDoc.id,
+          title: apiDoc.title || apiDoc.filename,
+          summary: apiDoc.summary || "No summary available",
+          isFavorite: false,
+        }));
+      }
+      
       const uniqueDocs = formattedDocs.filter((doc, index, self) => index === self.findIndex(d => d.id === doc.id));
       setDocuments(uniqueDocs);
     } catch (error) {
