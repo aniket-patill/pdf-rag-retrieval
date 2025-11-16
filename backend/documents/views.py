@@ -664,22 +664,55 @@ def upload_pdf(request):
         # Trigger async document processing (chunking, embedding, and summary)
         try:
             import threading
-            from django.core.management import call_command
             
             def process_document_async():
                 try:
                     logger.info(f"Starting async processing for document {document_id}")
-                    # Run the management command in a separate thread
-                    call_command('ingest_pdfs', '--document-id', document_id)
+                    
+                    # Initialize services
+                    embedding_service = EmbeddingService()
+                    chromadb_service = ChromaDBService(settings.CHROMADB_PATH)
+                    gemini_service = GeminiService(settings.GEMINI_API_KEY)
+                    
+                    # Split text into chunks
+                    chunks = embedding_service.split_text_into_chunks(text)
+                    
+                    if not chunks:
+                        logger.error(f"No chunks created for document {document_id}")
+                        return
+                    
+                    # Save chunks to database
+                    chunk_objects = []
+                    for chunk in chunks:
+                        chunk_obj = DocumentChunk.objects.create(  # type: ignore
+                            document=document,
+                            chunk_index=chunk['chunk_index'],
+                            text=chunk['text'],
+                            embedding_id=embedding_service.create_chunk_embedding_id(
+                                document_id, chunk['chunk_index']
+                            )
+                        )
+                        chunk_objects.append(chunk_obj)
+                    
+                    # Add chunks to ChromaDB
+                    chromadb_service.add_document_chunks(document_id, chunks)
+                    logger.info(f"Added {len(chunks)} chunks to ChromaDB for document {document_id}")
+                    
+                    # Generate summary
+                    try:
+                        summary = gemini_service.generate_summary(text, document.title or document.filename, max_length=1000)
+                        if summary:
+                            document.summary = summary
+                            document.summary_generated_at = timezone.now()
+                            document.save()
+                            logger.info(f"Generated summary for document {document_id}")
+                        else:
+                            logger.warning(f"Failed to generate summary for document {document_id}")
+                    except Exception as e:
+                        logger.error(f"Error generating summary for document {document_id}: {str(e)}")
+                        
                     logger.info(f"Completed async processing for document {document_id}")
                     
-                    # Also generate summary
-                    try:
-                        call_command('generate_summaries', '--document-id', document_id)
-                        logger.info(f"Completed async summary generation for document {document_id}")
-                    except Exception as e:
-                        logger.error(f"Error in async summary generation for document {document_id}: {str(e)}")
-                        
                 except Exception as e:
                     logger.error(f"Error in async document processing for document {document_id}: {str(e)}")
             
