@@ -684,27 +684,38 @@ def upload_pdf(request):
         # Add chunks to ChromaDB
         chromadb_service.add_document_chunks(document_id, chunks)
         
-        # Generate document summary automatically
-        try:
-            # Combine chunks for summary
-            full_text = " ".join([chunk['text'] for chunk in chunks])
-            summary = gemini_service.generate_summary(full_text, document.title or document.filename, max_length=1000)
-            
-            # Update document with summary
-            document.summary = summary
-            document.summary_generated_at = timezone.now()
-            document.save()
-        except Exception as e:
-            logger.error(f"Error generating summary for document {document_id}: {str(e)}")
-            # Don't fail the upload if summary generation fails
-            pass
-        
-        # Return success response
+        # Return success response immediately without waiting for summary
         serializer = DocumentSerializer(document)
-        return Response({
+        response_data = {
             'message': 'PDF uploaded and processed successfully',
             'document': serializer.data
-        }, status=status.HTTP_201_CREATED)
+        }
+        
+        # Trigger async summary generation
+        try:
+            import threading
+            from django.core.management import call_command
+            
+            def generate_summary_async():
+                try:
+                    # Run the management command in a separate thread
+                    call_command('generate_summaries', document_id=document_id)
+                    logger.info(f"Completed async summary generation for document {document_id}")
+                except Exception as e:
+                    logger.error(f"Error in async summary generation for document {document_id}: {str(e)}")
+            
+            # Start summary generation in background thread
+            summary_thread = threading.Thread(target=generate_summary_async)
+            summary_thread.daemon = True
+            summary_thread.start()
+            
+            logger.info(f"Started async summary generation thread for document {document_id}")
+            
+        except Exception as e:
+            logger.error(f"Error starting async summary generation for document {document_id}: {str(e)}")
+            # Don't fail the upload if summary generation fails to start
+        
+        return Response(response_data, status=status.HTTP_201_CREATED)
         
     except Exception as e:
         logger.error(f"Error uploading PDF: {str(e)}")
